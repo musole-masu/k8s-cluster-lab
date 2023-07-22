@@ -1,0 +1,30 @@
+---
+- name: Install Kubeadm, Kubelet and Kubectl
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Install Packages
+      apt:
+        name: ['apt-transport-https', 'ca-certificates', 'curl']
+        state: present
+        update_cache: yes
+
+    - name: Add Kubernetes GPG key
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+    
+    - name: Add Kubernetes APT repository
+      apt_repository:
+        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+
+    - name: Install kubelet, kubeadm and kubectl, and pin their version
+      apt:
+        name: ['kubelet', 'kubeadm', 'kubectl']
+        state: present
+        update_cache: yes
+
+    - name: Put Packages Kubeadm Kubectl Kubelet on hold
+      shell:  >
+              apt-mark hold kubeadm kubectl kubelet

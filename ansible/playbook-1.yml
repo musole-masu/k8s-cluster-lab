@@ -1,0 +1,49 @@
+---
+- name: Install Container Runtime (Containerd)
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Install Packages
+      apt:
+        name: ['apt-transport-https', 'ca-certificates', 'curl', 'gnupg', 'software-properties-common']
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      
+    - name: Add Docker APT repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu bionic stable
+
+    - name: Install Containerd
+      apt:
+        name: containerd.io
+        state: present
+        update_cache: yes
+    
+    - name: Ensure containerd.io is active
+      service:
+        name: containerd
+        state: started
+        enabled: yes
+
+    - name: Truncate config.toml file
+      command: sudo truncate -s 0 /etc/containerd/config.toml
+
+    - name: Configuring the systemd cgroup driver
+      blockinfile:
+        path: /etc/containerd/config.toml
+        block: |
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                SystemdCgroup = true
+    
+    - name: Restarting Containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
