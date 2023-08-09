@@ -27,26 +27,14 @@ end
 
 Vagrant.configure("2") do |config|
 
-    if File.dirname(ansible_inventory_path) != "."
-        Dir.mkdir(File.dirname(ansible_inventory_path)) unless Dir.exist?(File.dirname(ansible_inventory_path))
-    end
-
-    File.open(ansible_inventory_path, 'w') do |f|
-        nodes.each do |node|
-            if node[:group] != "master"
-                f.write "[#{node[:group]}]\n"
-                f.write "#{node[:hostname]} ansible_host=#{node[:ip]} ansible_user=vagrant ansible_ssh_private_key_file=#{ssh_key}\n"
-            else
-                f.write "[#{node[:group]}]\n"
-                f.write "#{node[:hostname]} ansible_host=#{node[:ip]} ansible_user=vagrant ansible_ssh_private_key_file=#{ssh_key}\n"
-            end
-        end
-
-        f.write "\n"
-        f.write "[all]\n"
-        nodes.each do |cfg|
-            f.write "#{node[:hostname]}\n"
-        end
+    groups = {"all" => []}
+    servers.each do |cfg|
+      if ! groups.has_key?(cfg[:group])
+        groups[cfg[:group]] = [cfg[:hostname]]
+      else
+        groups[cfg[:group]].push(cfg[:hostname])
+      end
+      groups["all"].push(cfg[:hostname])
     end
 
     # Loop through all nodes to provision vms
@@ -77,7 +65,7 @@ Vagrant.configure("2") do |config|
             if index == nodes.size - 1
                 ansible_playbook.each do |play|
                     conf.vm.provision :ansible do |ansible|
-                        ansible.inventory_path = ansible_inventory_path
+                        ansible.groups = groups
                         ansible.verbose = "v"
                         ansible.limit = "all"
                         ansible.playbook = play[:path]

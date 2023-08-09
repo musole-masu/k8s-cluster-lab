@@ -1,0 +1,94 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+ssh_key                     = "~/.ssh/id_rsa"
+box                         = "centos/7"
+
+servers = [
+  { :hostname => "server1", :ip => "10.10.10.10", :ram => 1024, :cpu => 2, :group => "servers" },
+  { :hostname => "client1", :ip => "10.10.10.11", :box => "ubuntu/xenial64", :group => "clients" },
+  { :hostname => "client2", :ip => "10.10.10.12", :group => "clients", :port_guest => 80, :port_host => 8080 },
+]
+
+ansible_playbook = "playbook.yml"
+
+Vagrant.configure(2) do |config|
+  if Vagrant.has_plugin?("vagrant-hostmanager")
+    config.hostmanager.enabled = true
+    config.hostmanager.manage_host = true
+    config.hostmanager.manage_guest = true
+    config.hostmanager.ignore_private_ip = false
+    config.hostmanager.include_offline = false
+
+    # Resolve dynamic ip address (dhcp) of the host and guests for the /etc/hosts file.
+    # https://github.com/devopsgroup-io/vagrant-hostmanager/issues/86
+    servers.each do |server|
+      if server[:ip] == "dhcp"
+        cached_addresses = {}
+        config.hostmanager.ip_resolver = proc do |vm, resolving_vm|
+          if cached_addresses[vm.name].nil?
+            if hostname = (vm.ssh_info && vm.ssh_info[:host])
+              vm.communicate.execute("hostname -I | cut -d ' ' -f 2") do |type, contents|
+                cached_addresses[vm.name] = contents.split("\n").first[/(\d+\.\d+\.\d+\.\d+)/, 1]
+              end
+            end
+          end
+          cached_addresses[vm.name]
+        end
+      end
+    end
+  end
+
+  groups = {"all" => []}
+  servers.each do |cfg|
+    if ! groups.has_key?(cfg[:group])
+      groups[cfg[:group]] = [cfg[:hostname]]
+    else
+      groups[cfg[:group]].push(cfg[:hostname])
+    end
+    groups["all"].push(cfg[:hostname])
+  end
+
+  servers.each_with_index do |server, index|
+    box_image = server[:box] ? server[:box] : box;
+    config.vm.define server[:hostname] do |conf|
+      conf.vm.box = box_image.to_s
+      conf.vm.hostname = server[:hostname]
+
+     
+      conf.vm.network "private_network", ip: server[:ip]
+
+      if !server[:port_guest].nil? && !server[:port_host].nil?
+        conf.vm.network "forwarded_port", guest: server[:port_guest], host: server[:port_host]
+
+      cpu = server[:cpu] ? server[:cpu] : 1;
+      memory = server[:ram] ? server[:ram] : 512;
+      conf.vm.provider "virtualbox" do |vb|
+        vb.customize ["modifyvm", :id, "--cpus", cpu.to_s]
+        vb.customize ["modifyvm", :id, "--memory", memory.to_s]
+      end
+
+      conf.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", ssh_key]
+      conf.ssh.insert_key = false
+      conf.vm.provision "file", source: ssh_key + ".pub", destination: "~/.ssh/authorized_keys"
+
+      # The ubuntu/xenial64 box is missing python. Install it for ansible provision.
+      if box_image == "ubuntu/xenial64"
+        conf.vm.provision "shell" do |s|
+          s.inline = "test -e /usr/bin/python || (apt-get -qqy update && apt-get install -qqy python-minimal)"
+        end
+      end
+
+      if index == servers.size - 1
+        if ansible_playbook != ""
+          conf.vm.provision :ansible do |ansible|
+            ansible.verbose = "v"
+            ansible.limit = "all"
+            ansible.groups = groups
+            ansible.playbook = ansible_playbook
+          end
+        end
+      end
+    end
+  end
+end
